@@ -7,8 +7,6 @@
 
 **Skill Audit** is a portable audit workflow for reviewing, testing, and improving agent Skills, including Codex/Claude/Perplexity-style Skill directories. It combines deterministic checks with LLM-assisted semantic review so Skills stay loadable, concise, maintainable, and aligned with real user requests.
 
-This repository is a Skill package plus human-facing repository documentation. When the Skill is installed, the runtime assets are `SKILL.md`, `scripts/`, and `references/`; the README files are repository documentation, not runtime instructions.
-
 ## Design Sources
 
 This Skill incorporates ideas from three public Skill-design traditions:
