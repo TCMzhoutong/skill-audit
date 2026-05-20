@@ -15,6 +15,9 @@
 - 根目录只保留 `SKILL.md` 和可选 `agents/`、`scripts/`、`references/`、`assets/`。
 - 包管理例外：允许 `.gitignore` 和 `LICENSE`。
 - `scripts/` 放可执行、确定性、可复用步骤。
+- 属于某个 Skill 的资源必须放在该 Skill 目录下：脚本进 `scripts/`，说明性 Markdown 进 `references/`，模板和样例等进 `assets/`，agent 元数据进 `agents/`。
+- 只有多个 Skill 或项目初始化共用的资源才放项目根目录；引用时必须明确标注为 shared project resource。
+- Skill 文档中引用本 Skill 资源时，使用相对 Skill 根目录的 `scripts/...`、`references/...`、`assets/...`、`agents/...`，不要写 `skills/<skill-name>/...`。
 - `references/` 放按需加载的说明、领域知识、复杂规则。
 - `assets/` 放输出会使用但不该读入上下文的模板、图片、字体、样例文件。
 - README、安装指南、速查、变更日志等人类项目文档通常不属于 Skill 运行资产。

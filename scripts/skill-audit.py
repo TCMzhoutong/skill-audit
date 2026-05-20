@@ -89,6 +89,11 @@ ASSET_EXTENSIONS = {
     ".ttf",
     ".xlsx",
 }
+RESOURCE_DIRS = {"agents", "assets", "references", "scripts"}
+RESOURCE_PATH_RE = re.compile(
+    r"(?P<path>(?:\.?[\\/])?(?:skills[\\/][A-Za-z0-9_-]+[\\/])?"
+    r"(?:agents|assets|references|scripts)[\\/][^\s`'\"<>|]+)"
+)
 AGENT_METADATA_NAMES = {"openai.yaml", "openai.yml"}
 DESCRIPTION_WORKFLOW_PATTERNS = [
     "workflow",
@@ -262,6 +267,88 @@ def check_references(skill_dir: Path, refs: list[str]) -> list[dict[str, Any]]:
             continue
         if not path.exists():
             findings.append({"severity": "error", "issue": "missing_reference", "reference": ref})
+    return findings
+
+
+def normalize_ref_path(value: str) -> str:
+    return value.replace("\\", "/").lstrip("./")
+
+
+def check_local_resource_paths(skill_dir: Path, files: list[tuple[Path, str]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    seen_findings: set[tuple[str, int, str, str]] = set()
+    skill_root = skill_dir.resolve()
+    skill_prefix = f"skills/{skill_dir.name}/"
+    seen_files: set[str] = set()
+    for file_path, text in files:
+        file_key = str(file_path.resolve())
+        if file_key in seen_files:
+            continue
+        seen_files.add(file_key)
+        try:
+            rel_file = str(file_path.relative_to(skill_root))
+        except ValueError:
+            rel_file = str(file_path)
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for match in RESOURCE_PATH_RE.finditer(line):
+                raw = match.group("path").rstrip(".,);]")
+                normalized = normalize_ref_path(raw)
+                if normalized.endswith("/") or normalized.endswith("\\"):
+                    continue
+                if any(token in normalized.casefold() for token in ["example", "<", ">", "..."]):
+                    continue
+                if normalized.startswith(skill_prefix):
+                    key = (rel_file, lineno, raw, "skill_internal_resource_uses_project_relative_path")
+                    if key not in seen_findings:
+                        findings.append(
+                            {
+                                "severity": "warning",
+                                "issue": "skill_internal_resource_uses_project_relative_path",
+                                "file": rel_file,
+                                "line": lineno,
+                                "path": raw,
+                                "recommendation": "Use a path relative to this Skill root, such as scripts/..., references/..., assets/..., or agents/....",
+                            }
+                        )
+                        seen_findings.add(key)
+                    normalized = normalized[len(skill_prefix) :]
+                top = normalized.split("/", 1)[0]
+                if top in RESOURCE_DIRS:
+                    local_resource = skill_root / normalized
+                    shared_resource = WORK_ROOT / normalized
+                    if local_resource.exists():
+                        continue
+                    if shared_resource.exists():
+                        line_key = line.casefold()
+                        if "shared project resource" in line_key or "shared project script" in line_key or "共享" in line:
+                            continue
+                        key = (rel_file, lineno, raw, "resource_reference_resolves_to_project_root_not_skill")
+                        if key not in seen_findings:
+                            findings.append(
+                                {
+                                    "severity": "warning",
+                                    "issue": "resource_reference_resolves_to_project_root_not_skill",
+                                    "file": rel_file,
+                                    "line": lineno,
+                                    "path": raw,
+                                    "recommendation": "If this resource belongs to the Skill, move it under the Skill directory; otherwise state that it is a shared project resource.",
+                                }
+                            )
+                            seen_findings.add(key)
+                        continue
+                    key = (rel_file, lineno, raw, "missing_resource_reference")
+                    if key not in seen_findings:
+                        findings.append(
+                            {
+                                "severity": "error",
+                                "issue": "missing_resource_reference",
+                                "file": rel_file,
+                                "line": lineno,
+                                "path": raw,
+                                "recommendation": "Skill resource paths should resolve from the Skill root unless explicitly marked as shared project resources.",
+                            }
+                        )
+                        seen_findings.add(key)
     return findings
 
 
@@ -536,6 +623,12 @@ def audit_skill(skill_dir: Path) -> dict[str, Any]:
                 expanded_refs.add(str((ref_path.parent / child_ref).relative_to(skill_dir)))
     refs = sorted(expanded_refs)
     findings.extend(check_references(skill_dir, refs))
+    scanned_files: list[tuple[Path, str]] = [(skill_md, text)]
+    for ref in refs:
+        ref_path = skill_dir / ref
+        if ref_path.exists():
+            scanned_files.append((ref_path, ref_path.read_text(encoding="utf-8-sig", errors="replace")))
+    findings.extend(check_local_resource_paths(skill_dir, scanned_files))
 
     for path in skill_dir.rglob("*.md"):
         if path.name == "SKILL.md":

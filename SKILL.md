@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Load when the user asks to review, test, fix, or improve an agent Skill, Codex/Claude/Perplexity-style Skill, compare Skill versions, design Skill evals, or check whether a Skill should load.
+description: Load when the user asks to review, test, fix, or improve an agent Skill, Codex/Claude Skill, compare Skill versions, design Skill evals, or check whether a Skill should load.
 ---
 
 # Skill Audit
@@ -43,6 +43,7 @@ python3 scripts/skill-audit.py --all --write
 ## 必查重点
 
 - 目录结构：根目录只保留 `SKILL.md` 和可选 `agents/`、`scripts/`、`references/`、`assets/`；多余 README、安装说明、速查、变更日志应移除或并入必要资源。
+- 资源路径：属于目标 skill 的脚本、Markdown、模板、资产和 agent 元数据都应在目标 skill 目录下；文档引用使用 `scripts/...`、`references/...`、`assets/...`、`agents/...` 这类 skill 相对路径。
 - Frontmatter：`name` 必须与目录名逐字符一致；`description` 必须以 `Load when...` 开头、50 词以内、描述真实用户意图，不描述工作流。
 - 依赖：`depends` 只声明其他 Skill 名称。递归加载依赖是宿主 loader 的职责；审查时只校验字段结构和本地依赖是否存在。
 - 正文：写给模型看，只保留目标、约束、选择依据、失败恢复和 gotchas；避免把模型已经知道的通用命令写成固定流水线。
