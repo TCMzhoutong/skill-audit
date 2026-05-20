@@ -7,8 +7,6 @@
 
 **Skill Audit** 是一个用于审查、测试和改进 agent Skill 的可移植工作流，适用于 Codex/Claude/Perplexity 风格的 Skill 目录。它把确定性脚本检查和 LLM 语义审查结合起来，让 Skill 保持可加载、简洁、可维护，并且能匹配真实用户请求。
 
-这个仓库同时包含 Skill 包和面向人的仓库说明。安装为 Skill 时，运行资产是 `SKILL.md`、`scripts/` 和 `references/`；README 文件是仓库文档，不是运行时指令。
-
 ## 设计来源
 
 这个 Skill 综合参考了三类公开的 Skill 设计思路：
