@@ -5,24 +5,40 @@
   <a href="README_CN.md">简体中文</a>
 </p>
 
-**Skill Audit** is a local workflow for auditing, evaluating, and improving Codex/Claude-style skills. It combines deterministic script checks with LLM-assisted review so skill instructions remain concise, executable, and aligned with real project workflows.
+**Skill Audit** is a portable audit workflow for reviewing, testing, and improving agent Skills, including Codex/Claude/Perplexity-style Skill directories. It combines deterministic checks with LLM-assisted semantic review so Skills stay loadable, concise, maintainable, and aligned with real user requests.
 
-This skill adapts two complementary ideas:
+This repository is a Skill package plus human-facing repository documentation. When the Skill is installed, the runtime assets are `SKILL.md`, `scripts/`, and `references/`; the README files are repository documentation, not runtime instructions.
 
-- Codex-style skill design: progressive disclosure, clear trigger boundaries, and script-backed deterministic steps.
-- Anthropic/Claude skill-creator practice: evaluate skills on realistic tasks, identify failure modes, and iterate from observed behavior.
+## Design Sources
 
-It is not a wrapper around Claude's official tooling. It turns those principles into a portable audit workflow that can run inside a standalone skill repository or a larger project with a `skills/` directory.
+This Skill incorporates ideas from three public Skill-design traditions:
+
+- Codex Skill design: progressive disclosure, bundled resources, script-backed deterministic steps, and concise runtime instructions.
+- Anthropic/Claude Skill Creator guidance: realistic task evaluation, regression cases, and iterative improvement from observed failures.
+- Perplexity Research: routing-oriented descriptions, context-cost discipline, dependency/frontmatter separation, gotcha-driven refinement, loading/resource/task evals, and action-at-a-distance checks.
+
+New rules in the current version were added after reviewing Perplexity Research, **"Designing, Refining, and Maintaining Agent Skills at Perplexity"**:
+
+https://research.perplexity.ai/articles/designing-refining-and-maintaining-agent-skills-at-perplexity
 
 ## What It Checks
 
-- Trigger boundaries: when the skill should and should not activate.
-- Progressive disclosure: whether `SKILL.md` stays lean and loads details only when needed.
-- Success criteria: whether outputs, validation points, and completion conditions are explicit.
-- Cognitive load: whether the skill contains historical blame, excessive examples, or distracting process narration.
-- Hallucination risk: whether it references unsupported slash commands, unavailable tools, or unverified platform behavior.
-- Scriptable steps: whether deterministic tasks are handled by scripts instead of repeated LLM reasoning.
-- Evaluation readiness: whether realistic prompts and regression cases can test the skill.
+- Whether a task should be a Skill at all.
+- Standard Skill directory structure.
+- Resource placement: root files that should move into `references/`, `scripts/`, `assets/`, or `agents/`.
+- Frontmatter rules:
+  - `name` must exactly match the directory name.
+  - `name` and directory name must be slug-style: lowercase letters, digits, and single hyphens.
+  - `description` must start with `Load when...`.
+  - `description` must be 50 words or fewer.
+  - `description` should describe real user intent, not the Skill's workflow.
+  - `depends` is checked as a simple list of dependent Skill names.
+- Trigger boundaries, including should-load, should-not-load, and forbidden-load cases.
+- Action at a distance: whether a new or changed Skill could steal requests from nearby Skills.
+- Progressive disclosure and context cost.
+- Railroading risks in `SKILL.md` body instructions.
+- Gotchas distilled from real agent failures.
+- Missing references, long reference files without navigation, unsupported tool/platform claims, and scriptable opportunities.
 
 ## Repository Layout
 
@@ -41,63 +57,71 @@ skill-audit/
 
 ## Installation
 
-Install this repository as a skill in your Codex or Claude Code skills directory.
+Install or clone this repository into the Skills directory used by your agent environment.
 
-For Codex, you can use your normal skill installation flow or clone this repository into the skills directory used by your Codex environment. For Claude Code, install it the same way you install other local skills.
+Example:
 
-After installation, ask your coding agent to use the skill directly.
+```bash
+git clone https://github.com/TCMzhoutong/skill-audit.git ~/.codex/skills/skill-audit
+```
+
+Adjust the destination path for your local Codex, Claude Code, or other agent setup.
 
 ## Usage
 
 Use natural-language requests such as:
 
 ```text
-Use skill-audit to review this skill.
+Use skill-audit to review this Skill.
 ```
 
 ```text
-Use skill-audit to audit skills/paper-card for progressive disclosure, trigger boundaries, excessive examples, hallucination risks, and scriptable steps.
+Use skill-audit to audit skills/paper-card for trigger boundaries, progressive disclosure, resource placement, and frontmatter issues.
 ```
 
 ```text
-Use skill-audit to compare the current version of this skill with the previous version and suggest fixes.
+Use skill-audit to compare the current version of this Skill with the previous version and design regression evals.
 ```
 
 The agent should:
 
-1. Load `SKILL.md`.
-2. Run the deterministic audit script when available.
+1. Run the deterministic script when possible.
+2. Read `SKILL.md`.
 3. Read `references/review-rubric.md` for semantic review.
-4. Use `references/eval-workflow.md` when real-task evaluation or version comparison is needed.
-5. Return findings, a fix plan, and whether an eval is needed.
+4. Read `references/eval-workflow.md` when testing, comparing versions, or designing evals.
+5. Return findings first, then a fix plan and eval needs.
 
-## Optional Local Script Check
+## Local Script
 
-You can also run the bundled script manually before asking the agent for semantic review.
+Audit the current repository root as a Skill:
 
-Audit the current repository root as a skill:
-
-```powershell
-python .\scripts\skill-audit.py --write
+```bash
+python3 scripts/skill-audit.py --write
 ```
 
-Audit one skill in a larger project:
+Audit one Skill:
 
-```powershell
-python .\scripts\skill-audit.py --skill <skill-name-or-path> --write
+```bash
+python3 scripts/skill-audit.py --skill <skill-name-or-path> --write
 ```
 
-Audit all skills under a project-level `skills/` directory:
+Audit all Skills under a project-level `skills/` directory:
 
-```powershell
-python .\scripts\skill-audit.py --all --write
+```bash
+python3 scripts/skill-audit.py --all --write
 ```
 
-The JSON report is written under:
+The JSON report is written to:
 
 ```text
 data/skill-audit/<skill-name>-audit.json
 ```
+
+## Script Scope
+
+The script is intentionally deterministic and conservative. It checks repeatable issues such as file structure, references, frontmatter shape, description wording, slug naming, root-file placement, long references, and obvious railroading signals.
+
+The frontmatter parser is intentionally limited to scalar `name`/`description` values and simple list-style `depends` entries. Complex YAML should be reviewed manually or supported by extending the script.
 
 ## Review Output
 
@@ -117,15 +141,6 @@ fix_plan:
   - ""
 needs_eval: true | false
 ```
-
-## Design Boundary
-
-The audit workflow separates deterministic checks from semantic judgment:
-
-- Scripts check structure, file references, frontmatter, command mentions, resource links, and other repeatable issues.
-- The reviewing agent judges trigger fit, progressive disclosure quality, generalization, overfitting, and whether real-task eval is needed.
-
-This keeps skill review practical: scripts catch repeatable defects, while the LLM handles judgment that cannot be reduced to static rules.
 
 ## License
 

@@ -1,5 +1,9 @@
-#!/usr/bin/env python
-"""Deterministic checks for project-local skills."""
+#!/usr/bin/env python3
+"""Deterministic checks for project-local skills.
+
+Frontmatter parsing is intentionally limited to scalar name/description values
+and simple list-style depends entries. Extend it before relying on nested YAML.
+"""
 
 from __future__ import annotations
 
@@ -11,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SKILLS_ROOT = ROOT / "skills"
-OUT_ROOT = ROOT / "data" / "skill-audit"
+SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+WORK_ROOT = Path.cwd().resolve()
+SKILLS_ROOT = WORK_ROOT / "skills"
+OUT_ROOT = WORK_ROOT / "data" / "skill-audit"
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -56,6 +61,7 @@ ATTENTION_RISK_PATTERNS = [
 
 EXTRANEOUS_DOCS = {
     "README.md",
+    "README_CN.md",
     "INSTALLATION_GUIDE.md",
     "QUICK_REFERENCE.md",
     "CHANGELOG.md",
@@ -63,15 +69,79 @@ EXTRANEOUS_DOCS = {
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 LOCAL_MD_REF_RE = re.compile(r"(?:Read|见|参见|读取|打开)\s+`([^`]+\.md)`")
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+STANDARD_TOP_LEVEL_DIRS = {"agents", "assets", "references", "scripts"}
+STANDARD_TOP_LEVEL_FILES = {"SKILL.md", ".gitignore", "LICENSE"}
+SCRIPT_EXTENSIONS = {".bash", ".js", ".mjs", ".ps1", ".py", ".rb", ".sh", ".ts"}
+ASSET_EXTENSIONS = {
+    ".csv",
+    ".docx",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".json",
+    ".otf",
+    ".pdf",
+    ".png",
+    ".pptx",
+    ".svg",
+    ".ttf",
+    ".xlsx",
+}
+AGENT_METADATA_NAMES = {"openai.yaml", "openai.yml"}
+DESCRIPTION_WORKFLOW_PATTERNS = [
+    "workflow",
+    "steps",
+    "first",
+    "then",
+    "after that",
+    "will",
+    "先",
+    "然后",
+    "接着",
+    "最后",
+    "步骤",
+    "流程",
+    "工作流",
+]
+DESCRIPTION_CAPABILITY_PATTERNS = [
+    "this skill",
+    "the skill",
+    "provides",
+    "helps",
+    "can ",
+    "supports",
+    "用于",
+    "这个 skill",
+    "本 skill",
+    "能力",
+]
+USER_INTENT_HINTS = [
+    "asks",
+    "wants",
+    "needs",
+    "requests",
+    "user",
+    "用户",
+    "请求",
+    "想",
+    "需要",
+    "让我",
+    "帮我",
+]
+COMMAND_LINE_RE = re.compile(
+    r"^\s*(?:\d+[.)]\s*)?(?:python|python3|node|npm|pnpm|yarn|uv|pip|git|gh|cargo|go|ruby|bundle|make|bash|sh|sed|awk|rg|grep)\b"
+)
 
 
-def parse_frontmatter(text: str) -> tuple[dict[str, str], str, list[dict[str, Any]]]:
+def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
     findings: list[dict[str, Any]] = []
     match = FRONTMATTER_RE.match(text)
     if not match:
         return {}, text, [{"severity": "error", "issue": "missing_frontmatter"}]
 
-    frontmatter: dict[str, str] = {}
+    frontmatter: dict[str, Any] = {}
     current_key = ""
     for raw in match.group(1).splitlines():
         line = raw.rstrip()
@@ -83,13 +153,32 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str, list[dict[str, An
             value = key_match.group(2).strip()
             if value in {"|-", "|", ">-", ">"}:
                 frontmatter[current_key] = ""
+            elif value == "":
+                frontmatter[current_key] = []
             else:
                 frontmatter[current_key] = value.strip("\"'")
             continue
         if current_key and raw.startswith((" ", "\t")):
-            frontmatter[current_key] = (frontmatter[current_key] + "\n" + raw.strip()).strip()
+            item_match = re.match(r"^\s*-\s+(.+?)\s*$", raw)
+            if isinstance(frontmatter.get(current_key), list) and item_match:
+                frontmatter[current_key].append(item_match.group(1).strip("\"'"))
+            elif isinstance(frontmatter.get(current_key), str):
+                frontmatter[current_key] = (frontmatter[current_key] + "\n" + raw.strip()).strip()
 
     return frontmatter, text[match.end() :], findings
+
+
+def scalar(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?|[\u4e00-\u9fff]", text))
+
+
+def pattern_hits(text: str, patterns: list[str]) -> list[str]:
+    folded = text.casefold()
+    return [pattern for pattern in patterns if pattern.casefold() in folded]
 
 
 def line_hits(text: str, patterns: list[str]) -> list[dict[str, Any]]:
@@ -106,18 +195,21 @@ def line_hits(text: str, patterns: list[str]) -> list[dict[str, Any]]:
 def resolve_skill_path(value: str) -> Path:
     raw = Path(value)
     if raw.exists():
-        return raw
+        return raw.resolve()
     candidate = SKILLS_ROOT / value
     if candidate.exists():
-        return candidate
+        return candidate.resolve()
+    personal_candidate = SCRIPT_ROOT.parent / value
+    if personal_candidate.exists():
+        return personal_candidate.resolve()
     raise SystemExit(f"skill not found: {value}")
 
 
 def iter_skill_paths(args: argparse.Namespace) -> list[Path]:
     if args.all:
         if not SKILLS_ROOT.exists():
-            if (ROOT / "SKILL.md").exists():
-                return [ROOT]
+            if (WORK_ROOT / "SKILL.md").exists():
+                return [WORK_ROOT]
             raise SystemExit("skills/ not found and current repository has no SKILL.md")
         return sorted(
             path
@@ -125,8 +217,8 @@ def iter_skill_paths(args: argparse.Namespace) -> list[Path]:
             if path.is_dir() and not path.name.startswith("_") and (path / "SKILL.md").exists()
         )
     if not args.skill:
-        if (ROOT / "SKILL.md").exists():
-            return [ROOT]
+        if (WORK_ROOT / "SKILL.md").exists():
+            return [WORK_ROOT]
         raise SystemExit("pass --skill <name-or-path> or --all")
     return [resolve_skill_path(args.skill)]
 
@@ -190,13 +282,226 @@ def has_toc(text: str) -> bool:
     return "目录" in head or "table of contents" in head or "toc" in head
 
 
+def check_standard_structure(skill_dir: Path) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    unexpected: list[str] = []
+    root_markdown: list[str] = []
+    root_scripts: list[str] = []
+    root_assets: list[str] = []
+    root_agent_metadata: list[str] = []
+    for path in skill_dir.iterdir():
+        if path.is_dir() and path.name not in STANDARD_TOP_LEVEL_DIRS:
+            unexpected.append(path.name + "/")
+        elif path.is_file() and path.name not in STANDARD_TOP_LEVEL_FILES:
+            unexpected.append(path.name)
+            suffix = path.suffix.casefold()
+            if suffix == ".md":
+                root_markdown.append(path.name)
+            elif suffix in SCRIPT_EXTENSIONS:
+                root_scripts.append(path.name)
+            elif suffix in ASSET_EXTENSIONS:
+                root_assets.append(path.name)
+            elif path.name.casefold() in AGENT_METADATA_NAMES:
+                root_agent_metadata.append(path.name)
+    if unexpected:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "nonstandard_top_level_entries",
+                "entries": sorted(unexpected),
+                "recommendation": "Keep root entries to SKILL.md plus optional agents/, scripts/, references/, assets/.",
+            }
+        )
+    if root_markdown:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "root_markdown_should_move_to_references",
+                "files": sorted(root_markdown),
+                "recommendation": "Move explanatory Markdown resources into references/ and update relative links from SKILL.md.",
+            }
+        )
+    if root_scripts:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "root_script_should_move_to_scripts",
+                "files": sorted(root_scripts),
+                "recommendation": "Move executable reusable files into scripts/ and update any command paths.",
+            }
+        )
+    if root_assets:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "root_asset_should_move_to_assets",
+                "files": sorted(root_assets),
+                "recommendation": "Move templates, media, binary, and sample data files into assets/ unless they are meant to be read as references.",
+            }
+        )
+    if root_agent_metadata:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "root_agent_metadata_should_move_to_agents",
+                "files": sorted(root_agent_metadata),
+                "recommendation": "Move UI-facing agent metadata into agents/.",
+            }
+        )
+    return findings
+
+
+def check_skill_name_slug(value: str, field: str) -> list[dict[str, Any]]:
+    if SKILL_NAME_RE.fullmatch(value):
+        return []
+    return [
+        {
+            "severity": "error",
+            "issue": f"{field}_invalid_slug",
+            "value": value,
+            "recommendation": "Use lowercase letters, digits, and single hyphens only, for example skill-audit.",
+        }
+    ]
+
+
+def parse_depends(value: Any) -> tuple[list[str], list[dict[str, Any]]]:
+    findings: list[dict[str, Any]] = []
+    if value in (None, "", []):
+        return [], findings
+    if isinstance(value, list):
+        deps = [item for item in value if isinstance(item, str)]
+        if len(deps) != len(value):
+            findings.append({"severity": "error", "issue": "frontmatter_depends_non_string_item"})
+        return deps, findings
+    if isinstance(value, str):
+        if "," in value:
+            deps = [item.strip() for item in value.split(",") if item.strip()]
+            findings.append(
+                {
+                    "severity": "warning",
+                    "issue": "frontmatter_depends_inline_csv",
+                    "recommendation": "Prefer YAML list form: depends: followed by - skill-name entries.",
+                }
+            )
+            return deps, findings
+        return [value], findings
+    findings.append({"severity": "error", "issue": "frontmatter_depends_invalid_type"})
+    return [], findings
+
+
+def check_depends(skill_dir: Path, frontmatter: dict[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    deps, dep_findings = parse_depends(frontmatter.get("depends"))
+    findings.extend(dep_findings)
+    if not deps:
+        return findings
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for dep in deps:
+        if dep in seen:
+            duplicates.append(dep)
+        seen.add(dep)
+        if dep == skill_dir.name:
+            findings.append({"severity": "error", "issue": "frontmatter_depends_self", "dependency": dep})
+        if "\n" in dep or not dep.strip():
+            findings.append({"severity": "error", "issue": "frontmatter_depends_invalid_name", "dependency": dep})
+        if SKILLS_ROOT.exists() and not (SKILLS_ROOT / dep).is_dir() and skill_dir.parent == SKILLS_ROOT:
+            findings.append({"severity": "warning", "issue": "frontmatter_depends_missing_local_skill", "dependency": dep})
+    if duplicates:
+        findings.append({"severity": "warning", "issue": "frontmatter_depends_duplicates", "dependencies": sorted(set(duplicates))})
+    return findings
+
+
+def check_description(description: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    if not description:
+        findings.append({"severity": "error", "issue": "frontmatter_missing_description"})
+        return findings
+    words = word_count(description)
+    if not description.startswith("Load when "):
+        findings.append(
+            {
+                "severity": "error",
+                "issue": "description_must_start_load_when",
+                "recommendation": 'Start with "Load when..." and describe the user intent that should trigger the Skill.',
+            }
+        )
+    if words > 50:
+        findings.append({"severity": "error", "issue": "description_over_50_words", "words": words})
+    workflow_hits = pattern_hits(description, DESCRIPTION_WORKFLOW_PATTERNS)
+    if workflow_hits:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "description_may_describe_workflow",
+                "patterns": workflow_hits[:8],
+                "recommendation": "Describe real user intent, not the sequence the Skill will follow.",
+            }
+        )
+    capability_hits = pattern_hits(description, DESCRIPTION_CAPABILITY_PATTERNS)
+    if capability_hits:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "description_may_describe_skill_capability",
+                "patterns": capability_hits[:8],
+                "recommendation": "Prefer phrases users would say or ask for over describing what the Skill is.",
+            }
+        )
+    if not pattern_hits(description, USER_INTENT_HINTS):
+        findings.append(
+            {
+                "severity": "info",
+                "issue": "description_lacks_user_intent_language",
+                "recommendation": "Check whether the description uses words from real user requests.",
+            }
+        )
+    return findings
+
+
+def check_body_style(body: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    command_lines = []
+    in_fence = False
+    for lineno, line in enumerate(body.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and COMMAND_LINE_RE.match(line):
+            command_lines.append({"line": lineno, "text": stripped[:180]})
+    if len(command_lines) >= 8:
+        findings.append(
+            {
+                "severity": "warning",
+                "issue": "possible_railroading_command_sequence",
+                "count": len(command_lines),
+                "sample": command_lines[:8],
+                "recommendation": "Replace rigid command sequences with goals, constraints, recovery guidance, or scripts.",
+            }
+        )
+    if not re.search(r"(?im)^#{1,3}\s*(gotchas?|注意事项|易错|陷阱|失败)", body):
+        findings.append(
+            {
+                "severity": "info",
+                "issue": "missing_gotchas_section",
+                "recommendation": "For mature Skills, add concise gotchas distilled from real agent failures.",
+            }
+        )
+    return findings
+
+
 def audit_skill(skill_dir: Path) -> dict[str, Any]:
     skill_md = skill_dir / "SKILL.md"
     findings: list[dict[str, Any]] = []
     if not skill_md.exists():
+        try:
+            rel_path = str(skill_dir.relative_to(WORK_ROOT))
+        except ValueError:
+            rel_path = str(skill_dir)
         return {
             "skill": skill_dir.name,
-            "path": str(skill_dir.relative_to(ROOT)),
+            "path": rel_path,
             "ok": False,
             "findings": [{"severity": "error", "issue": "missing_SKILL.md"}],
         }
@@ -204,17 +509,19 @@ def audit_skill(skill_dir: Path) -> dict[str, Any]:
     text = skill_md.read_text(encoding="utf-8-sig", errors="replace")
     frontmatter, body, fm_findings = parse_frontmatter(text)
     findings.extend(fm_findings)
+    findings.extend(check_standard_structure(skill_dir))
+    findings.extend(check_skill_name_slug(skill_dir.name, "directory_name"))
 
-    name = frontmatter.get("name", "")
-    description = frontmatter.get("description", "")
+    name = scalar(frontmatter.get("name", ""))
+    description = scalar(frontmatter.get("description", ""))
     if not name:
         findings.append({"severity": "error", "issue": "frontmatter_missing_name"})
-    elif skill_dir.resolve() != ROOT.resolve() and name != skill_dir.name:
-        findings.append({"severity": "error", "issue": "frontmatter_name_mismatch", "name": name, "folder": skill_dir.name})
-    if not description:
-        findings.append({"severity": "error", "issue": "frontmatter_missing_description"})
-    elif len(description) < 80:
-        findings.append({"severity": "warning", "issue": "description_may_undertrigger", "chars": len(description)})
+    else:
+        findings.extend(check_skill_name_slug(name, "frontmatter_name"))
+        if name != skill_dir.name:
+            findings.append({"severity": "error", "issue": "frontmatter_name_mismatch", "name": name, "folder": skill_dir.name})
+    findings.extend(check_description(description))
+    findings.extend(check_depends(skill_dir, frontmatter))
 
     line_count = len(text.splitlines())
     if line_count > 500:
@@ -256,6 +563,7 @@ def audit_skill(skill_dir: Path) -> dict[str, Any]:
     hits = attention_hits(text)
     if hits:
         findings.append({"severity": "warning", "issue": "attention_risk_language", "count": len(hits), "sample": hits[:8]})
+    findings.extend(check_body_style(body))
 
     # Detect local Markdown files that are not pointed to from SKILL.md. This is
     # a warning, not an error: some files can be intentionally loaded by scripts.
@@ -269,14 +577,21 @@ def audit_skill(skill_dir: Path) -> dict[str, Any]:
     if unreferenced:
         findings.append({"severity": "info", "issue": "unreferenced_markdown_resources", "files": unreferenced[:20]})
 
+    try:
+        rel_skill_path = "." if skill_dir == WORK_ROOT else str(skill_dir.relative_to(WORK_ROOT))
+    except ValueError:
+        rel_skill_path = str(skill_dir)
+
     ok = not any(item.get("severity") == "error" for item in findings)
     return {
         "skill": skill_dir.name,
-        "path": "." if skill_dir.resolve() == ROOT.resolve() else str(skill_dir.relative_to(ROOT)),
+        "path": rel_skill_path,
         "ok": ok,
         "metrics": {
             "skill_md_lines": line_count,
             "description_chars": len(description),
+            "description_words": word_count(description),
+            "name_is_valid_slug": bool(SKILL_NAME_RE.fullmatch(name)),
             "referenced_md_count": len(refs),
         },
         "findings": findings,
@@ -306,7 +621,7 @@ def main() -> int:
         name = "all" if args.all else reports[0]["skill"]
         out_path = OUT_ROOT / f"{name}-audit.json"
         out_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
-        output["written"] = str(out_path.relative_to(ROOT))
+        output["written"] = str(out_path.relative_to(WORK_ROOT))
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0 if output.get("ok", False) else 1

@@ -5,26 +5,42 @@
   <a href="README_CN.md"><strong>简体中文</strong></a>
 </p>
 
-**Skill Audit** 是一个用于审查、评估和改进 Codex/Claude 风格 skill 的本地工作流。它把确定性脚本检查和 LLM 语义审查结合起来，让 skill 说明保持简洁、可执行，并能和真实项目流程对齐。
+**Skill Audit** 是一个用于审查、测试和改进 agent Skill 的可移植工作流，适用于 Codex/Claude/Perplexity 风格的 Skill 目录。它把确定性脚本检查和 LLM 语义审查结合起来，让 Skill 保持可加载、简洁、可维护，并且能匹配真实用户请求。
 
-这个 skill 借鉴并转化了两类思路：
+这个仓库同时包含 Skill 包和面向人的仓库说明。安装为 Skill 时，运行资产是 `SKILL.md`、`scripts/` 和 `references/`；README 文件是仓库文档，不是运行时指令。
 
-- Codex 风格的 skill 设计：渐进式披露、清晰触发边界、确定性步骤脚本化。
-- Anthropic/Claude skill-creator 的实践：用真实任务评估 skill，发现失败模式，再基于实际表现迭代。
+## 设计来源
 
-它不是 Claude 官方工具的封装，而是把这些原则转化为可移植的审查工作流；既可以在独立 skill 仓库中运行，也可以在包含 `skills/` 目录的大型项目中运行。
+这个 Skill 综合参考了三类公开的 Skill 设计思路：
+
+- Codex Skill 设计：渐进式披露、随附资源、确定性步骤脚本化、简洁运行指令。
+- Anthropic/Claude Skill Creator 思路：真实任务评估、回归案例、基于实际失败迭代。
+- Perplexity Research：面向路由的 description、上下文成本控制、frontmatter 与正文分离、依赖声明、gotcha 驱动迭代、loading/resource/task eval，以及 action-at-a-distance 检查。
+
+当前版本新增规则参考了 Perplexity Research 的文章 **“Designing, Refining, and Maintaining Agent Skills at Perplexity”**：
+
+https://research.perplexity.ai/articles/designing-refining-and-maintaining-agent-skills-at-perplexity
 
 ## 审查内容
 
-- 触发边界：什么时候应该触发，什么时候不应该触发。
-- 渐进式披露：`SKILL.md` 是否保持简洁，细节是否按需加载。
-- 成功标准：输出、校验点和完成条件是否明确。
-- 认知负担：是否存在历史纠错叙事、过度举例或干扰性的流程说明。
-- 幻觉风险：是否引用了不支持的 slash command、不可用工具或未验证的平台能力。
-- 脚本化机会：确定性步骤是否交给脚本，而不是反复依赖 LLM 推理。
-- Eval 准备度：是否能用真实 prompt 和回归案例测试 skill。
+- 一个任务是否真的应该做成 Skill。
+- 标准 Skill 目录结构。
+- 资源归位：根目录文件是否应该移动到 `references/`、`scripts/`、`assets/` 或 `agents/`。
+- Frontmatter 规则：
+  - `name` 必须与目录名完全一致。
+  - `name` 和目录名必须是 slug：只使用小写字母、数字和单个连字符。
+  - `description` 必须以 `Load when...` 开头。
+  - `description` 必须控制在 50 词以内。
+  - `description` 应描述真实用户意图，而不是 Skill 的工作流。
+  - `depends` 会按简单依赖 Skill 名称列表检查。
+- 触发边界，包括 should-load、should-not-load 和 forbidden-load。
+- Action at a distance：新增或修改 Skill 是否会抢走相邻 Skill 的请求。
+- 渐进式披露和上下文成本。
+- `SKILL.md` 正文是否存在 railroading 风险。
+- 是否有来自真实 agent 失败的 gotchas。
+- 缺失引用、长 reference 缺少导航、不支持的工具/平台说法、可脚本化机会等。
 
-## 目录结构
+## 仓库结构
 
 ```text
 skill-audit/
@@ -41,52 +57,58 @@ skill-audit/
 
 ## 安装
 
-把这个仓库安装到你的 Codex 或 Claude Code skills 目录中。
+把这个仓库安装或 clone 到你的 agent 环境使用的 Skills 目录。
 
-安装方式可以沿用你当前环境里其他 skill 的安装方式，例如 clone 到 Codex 识别的 skills 目录，或者使用你平时的本地 skill 安装流程。安装完成后，直接让编码代理调用这个 skill。
+示例：
+
+```bash
+git clone https://github.com/TCMzhoutong/skill-audit.git ~/.codex/skills/skill-audit
+```
+
+如果你使用 Claude Code 或其他 agent 环境，请把目标路径替换成对应的本地 Skills 目录。
 
 ## 使用方式
 
-通过自然语言触发：
+可以用自然语言触发：
 
 ```text
-Use skill-audit to review this skill.
+Use skill-audit to review this Skill.
 ```
 
 ```text
-Use skill-audit to audit skills/paper-card for progressive disclosure, trigger boundaries, excessive examples, hallucination risks, and scriptable steps.
+Use skill-audit to audit skills/paper-card for trigger boundaries, progressive disclosure, resource placement, and frontmatter issues.
 ```
 
 ```text
-Use skill-audit to compare the current version of this skill with the previous version and suggest fixes.
+Use skill-audit to compare the current version of this Skill with the previous version and design regression evals.
 ```
 
 代理应该：
 
-1. 读取 `SKILL.md`。
-2. 如有需要，先运行确定性审查脚本。
+1. 尽可能先运行确定性脚本。
+2. 读取 `SKILL.md`。
 3. 读取 `references/review-rubric.md` 做语义审查。
-4. 需要真实任务测试或版本比较时，读取 `references/eval-workflow.md`。
-5. 返回发现、修正计划，以及是否需要 eval。
+4. 在测试、版本比较或设计 eval 时读取 `references/eval-workflow.md`。
+5. 先返回发现，再给出修正计划和是否需要 eval。
 
-## 可选的本地脚本检查
+## 本地脚本
 
-审查当前仓库根目录的 skill：
+审查当前仓库根目录的 Skill：
 
-```powershell
-python .\scripts\skill-audit.py --write
+```bash
+python3 scripts/skill-audit.py --write
 ```
 
-在大型项目中审查单个 skill：
+审查单个 Skill：
 
-```powershell
-python .\scripts\skill-audit.py --skill <skill-name-or-path> --write
+```bash
+python3 scripts/skill-audit.py --skill <skill-name-or-path> --write
 ```
 
-批量审查项目 `skills/` 下的多个 skill：
+批量审查项目级 `skills/` 目录下的 Skill：
 
-```powershell
-python .\scripts\skill-audit.py --all --write
+```bash
+python3 scripts/skill-audit.py --all --write
 ```
 
 JSON 报告会写入：
@@ -94,6 +116,12 @@ JSON 报告会写入：
 ```text
 data/skill-audit/<skill-name>-audit.json
 ```
+
+## 脚本范围
+
+脚本保持确定性和保守性。它检查文件结构、引用、frontmatter 形状、description 写法、slug 命名、根目录资源归位、长 reference、明显的 railroading 信号等可重复问题。
+
+当前 frontmatter 解析器是受限解析，只支持标量 `name`/`description` 和简单列表式 `depends`。复杂 YAML 需要人工确认，或先扩展脚本。
 
 ## 审查输出
 
@@ -113,15 +141,6 @@ fix_plan:
   - ""
 needs_eval: true | false
 ```
-
-## 设计边界
-
-这个工作流把机械检查和语义判断分开：
-
-- 脚本负责检查结构、文件引用、frontmatter、命令引用、资源链接等可重复问题。
-- 审查 agent 负责判断触发边界、渐进式披露质量、泛化能力、是否过拟合示例，以及是否需要真实任务 eval。
-
-这样可以让 skill 审查更务实：脚本捕捉可重复缺陷，LLM 处理无法静态规则化的判断。
 
 ## 许可证
 
